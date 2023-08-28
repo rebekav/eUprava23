@@ -1,0 +1,52 @@
+version: "3.1"
+
+networks:
+  tiseu:
+    name: tiseu
+
+services:
+
+  poreska-frontend:
+    build:
+      context: ./frontend
+    container_name: poreska-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "9001:9001"
+
+  poreska-backend:
+    build:
+      context: ./backend/
+    container_name: poreska-backend
+    ports:
+      - "9002:9002"
+    networks:
+      tiseu:
+        aliases:
+          - "poreska-backend"
+    depends_on:
+      - poreska-mysql
+
+  poreska-mysql:
+    image: mysql:8.0.23
+    container_name: poreska-mysql
+    ports:
+      - "9003:9003"
+    environment:
+      - MYSQL_TCP_PORT=9003
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=root
+    volumes:
+      - poreska-mysql-data:/var/lib/mysql
+      - ./database:/tmp/database
+    command: mysqld --init-file="/tmp/database/init_db.sql"
+    networks:
+      tiseu:
+        aliases:
+          - "poreska-mysql"
+
+volumes:
+  poreska-mysql-data:
+    driver: local

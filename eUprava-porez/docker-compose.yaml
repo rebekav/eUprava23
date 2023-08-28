@@ -1,0 +1,175 @@
+version: "3.1"
+
+networks:
+  tiseu:
+    name: tiseu
+
+x-auth-base-service: &auth-base-service
+  build:
+    context: ./auth-server/
+    dockerfile: Dockerfile.prod
+  working_dir: /usr/src/app
+  environment:
+    - NODE_ENV=docker-development
+    - DB_NAME=auth-server
+    - DB_URI=mongodb://auth-mongo:27017
+    - JWT_SECRET=secret
+    - JWT_DURATION=120m
+
+x-auth-direct-run-service: &auth-direct-run-service
+  <<: *auth-base-service
+  profiles: ["direct-run"]
+  build:
+    context: ./auth-server/
+    dockerfile: Dockerfile.dev
+
+services:
+  # --- AUTH SERVER ---
+  auth-app:
+    <<: *auth-base-service
+    command: node dist/main.js
+    container_name: auth-app
+    networks:
+      tiseu:
+        aliases:
+          - auth-app
+    ports:
+      - "4101:3101"
+      - "5101:3101"
+
+  auth-mongo:
+    image: mongo
+    container_name: auth-mongo
+    ports:
+      - "4117:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/db --quiet
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - auth-mongodb:/data/db
+    networks:
+      tiseu:
+        aliases:
+          - auth-mongo
+
+  auth-seed-admin:
+    <<: *auth-direct-run-service
+    entrypoint: npx nestjs-command seed:admin
+    networks:
+      tiseu:
+        aliases:
+          - auth-command-seed-admin
+  auth-seed-user:
+    <<: *auth-direct-run-service
+    entrypoint: npx nestjs-command seed:user
+    networks:
+      tiseu:
+        aliases:
+          - auth-command-seed-user
+
+  
+
+
+  # --- ePortal ---
+  eportal:
+    environment:
+      - VITE_PORT=4011
+      - VITE_APP_URL=http://localhost:4011
+      - VITE_AUTH_SERVER_URL=http://localhost:4101
+    build:
+      context: ./eportal/
+    container_name: eportal
+    networks:
+      tiseu:
+        aliases:
+          - eportal
+    ports:
+      - "4011:4011"
+
+  # --- procenitelj ---
+  procenitelj-backend:
+    build:
+      context: ./procenitelj/backend/
+    container_name: procenitelj-backend
+    ports:
+      - "8002:8002"
+    networks:
+      tiseu:
+        aliases:
+          - "procenitelj-backend"
+    depends_on:
+      - procenitelj-mysql
+
+  procenitelj-mysql:
+    image: mysql:8.0.23
+    container_name: procenitelj-mysql
+    ports:
+      - "8003:8003"
+    environment:
+      - MYSQL_TCP_PORT=8003
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=root
+    volumes:
+      - procenitelj-mysql-data:/var/lib/mysql
+      - ./procenitelj/database:/tmp/database
+    command: mysqld --init-file="/tmp/database/init_db.sql"
+    networks:
+      tiseu:
+        aliases:
+          - "procenitelj-mysql"
+  
+
+  # --- poreska ---
+  poreska-frontend:
+    environment:
+      - PORT=9001
+    build:
+      context: ./poreska/frontend
+    container_name: poreska-frontend
+    volumes:
+      - ./poreska/frontend:/app
+      - /app/node_modules
+    ports:
+      - "9001:9001"
+
+  poreska-backend:
+    build:
+      context: ./poreska/backend/
+    container_name: poreska-backend
+    ports:
+      - "9002:9002"
+    networks:
+      tiseu:
+        aliases:
+          - "poreska-backend"
+    depends_on:
+      - poreska-mysql
+
+  poreska-mysql:
+    image: mysql:8.0.23
+    container_name: poreska-mysql
+    ports:
+      - "9003:9003"
+    environment:
+      - MYSQL_TCP_PORT=9003
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=root
+    volumes:
+      - poreska-mysql-data:/var/lib/mysql
+      - ./poreska/database:/tmp/database
+    command: mysqld --init-file="/tmp/database/init_db.sql"
+    networks:
+      tiseu:
+        aliases:
+          - "poreska-mysql"
+
+volumes:
+  auth-mongodb:
+    driver: local
+  poreska-mysql-data:
+    driver: local
+  procenitelj-mysql-data:
+    driver: local
